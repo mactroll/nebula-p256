@@ -3,13 +3,17 @@ package cert
 import (
 	"bytes"
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"log"
+	"math/big"
 	"net"
 	"time"
 
@@ -19,6 +23,7 @@ import (
 )
 
 const publicKeyLen = 32
+const publicKeyLenP256 = 91
 
 const (
 	CertBanner              = "NEBULA CERTIFICATE"
@@ -26,6 +31,8 @@ const (
 	X25519PublicKeyBanner   = "NEBULA X25519 PUBLIC KEY"
 	Ed25519PrivateKeyBanner = "NEBULA ED25519 PRIVATE KEY"
 	Ed25519PublicKeyBanner  = "NEBULA ED25519 PUBLIC KEY"
+	P256PrivateKeyBanner    = "NEBULA P256 PRIVATE KEY"
+	P256PublicKeyBanner     = "NEBULA P256 PUBLIC KEY"
 )
 
 type NebulaCertificate struct {
@@ -144,6 +151,11 @@ func MarshalEd25519PrivateKey(key ed25519.PrivateKey) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: Ed25519PrivateKeyBanner, Bytes: key})
 }
 
+// MarshalP256PrivateKey is a simple helper to PEM encode a P256 private key
+func MarshalP256PrivateKey(key ecdsa.PrivateKey) []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: P256PrivateKeyBanner, Bytes: key.D.Bytes()})
+}
+
 // UnmarshalX25519PrivateKey will try to pem decode an X25519 private key, returning any other bytes b
 // or an error on failure
 func UnmarshalX25519PrivateKey(b []byte) ([]byte, []byte, error) {
@@ -178,6 +190,24 @@ func UnmarshalEd25519PrivateKey(b []byte) (ed25519.PrivateKey, []byte, error) {
 	return k.Bytes, r, nil
 }
 
+// UnmarshalP256PrivateKey will try to pem decode an Ed25519 private key, returning any other bytes b
+// or an error on failure
+func UnmarshalP256PrivateKey(b []byte) (ecdsa.PrivateKey, []byte, error) {
+	k, r := pem.Decode(b)
+	if k == nil {
+		return ecdsa.PrivateKey{}, r, fmt.Errorf("input did not contain a valid PEM encoded block")
+	}
+	if k.Type != P256PrivateKeyBanner {
+		return ecdsa.PrivateKey{}, r, fmt.Errorf("bytes did not contain a proper nebula Ed25519 private key banner")
+	}
+	if len(k.Bytes) != 32 {
+		log.Println("Key is %s bytes", string(len(k.Bytes)))
+		//return nil, r, fmt.Errorf("key was not 64 bytes, is invalid ed25519 private key")
+	}
+
+	return ecdsa.PrivateKey{D: new(big.Int).SetBytes(k.Bytes)}, r, nil
+}
+
 // MarshalX25519PublicKey is a simple helper to PEM encode an X25519 public key
 func MarshalX25519PublicKey(b []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: X25519PublicKeyBanner, Bytes: b})
@@ -186,6 +216,12 @@ func MarshalX25519PublicKey(b []byte) []byte {
 // MarshalEd25519PublicKey is a simple helper to PEM encode an Ed25519 public key
 func MarshalEd25519PublicKey(key ed25519.PublicKey) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: Ed25519PublicKeyBanner, Bytes: key})
+}
+
+// MarshalP256PublicKey is a simple helper to PEM encode an Ed25519 public key
+func MarshalP256PublicKey(key ecdsa.PublicKey) []byte {
+	x509EncodedPub, _ := x509.MarshalPKIXPublicKey(key)
+	return x509EncodedPub
 }
 
 // UnmarshalX25519PublicKey will try to pem decode an X25519 public key, returning any other bytes b
@@ -222,8 +258,38 @@ func UnmarshalEd25519PublicKey(b []byte) (ed25519.PublicKey, []byte, error) {
 	return k.Bytes, r, nil
 }
 
+// UnmarshalEd25519PublicKey will try to pem decode an Ed25519 public key, returning any other bytes b
+// or an error on failure
+func UnmarshalP256PublicKey(b []byte) (ecdsa.PublicKey, []byte, error) {
+
+	pub, err := x509.ParsePKIXPublicKey(b)
+
+	if err != nil {
+		return ecdsa.PublicKey{}, nil, err
+	}
+
+	pubFinal := pub.(*ecdsa.PublicKey)
+
+	return *pubFinal, pubFinal.X.Bytes(), nil
+}
+
 // Sign signs a nebula cert with the provided private key
 func (nc *NebulaCertificate) Sign(key ed25519.PrivateKey) error {
+	b, err := proto.Marshal(nc.getRawDetails())
+	if err != nil {
+		return err
+	}
+
+	sig, err := key.Sign(rand.Reader, b, crypto.Hash(0))
+	if err != nil {
+		return err
+	}
+	nc.Signature = sig
+	return nil
+}
+
+// Sign signs a nebula cert with the provided private key
+func (nc *NebulaCertificate) SignP256(key ecdsa.PrivateKey) error {
 	b, err := proto.Marshal(nc.getRawDetails())
 	if err != nil {
 		return err
@@ -244,6 +310,21 @@ func (nc *NebulaCertificate) CheckSignature(key ed25519.PublicKey) bool {
 		return false
 	}
 	return ed25519.Verify(key, b, nc.Signature)
+}
+
+type ecdsaSignature struct {
+	r big.Int
+	s big.Int
+}
+
+// CheckSignature verifies the signature against the provided public key
+func (nc *NebulaCertificate) CheckSignatureP256(key ecdsa.PublicKey) bool {
+	b, err := proto.Marshal(nc.getRawDetails())
+	if err != nil {
+		return false
+	}
+
+	return ecdsa.Verify(&key, b, b, nc.Signature)
 }
 
 // Expired will return true if the nebula cert is too young or too old compared to the provided time, otherwise false

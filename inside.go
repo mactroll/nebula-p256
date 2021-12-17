@@ -3,11 +3,11 @@ package nebula
 import (
 	"sync/atomic"
 
-	"github.com/flynn/noise"
 	"github.com/sirupsen/logrus"
 	"github.com/slackhq/nebula/firewall"
 	"github.com/slackhq/nebula/header"
 	"github.com/slackhq/nebula/iputil"
+	"github.com/slackhq/nebula/noise"
 	"github.com/slackhq/nebula/udp"
 )
 

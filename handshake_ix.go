@@ -4,10 +4,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/flynn/noise"
 	"github.com/golang/protobuf/proto"
 	"github.com/slackhq/nebula/header"
 	"github.com/slackhq/nebula/iputil"
+	"github.com/slackhq/nebula/noise"
 	"github.com/slackhq/nebula/udp"
 )
 
