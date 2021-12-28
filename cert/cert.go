@@ -324,7 +324,8 @@ func (nc *NebulaCertificate) CheckSignatureP256(key ecdsa.PublicKey) bool {
 		return false
 	}
 
-	return ecdsa.Verify(&key, b, b, nc.Signature)
+	// TODO: Maybe this needs a hash instead of the full message
+	return ecdsa.VerifyASN1(&key, b, nc.Signature)
 }
 
 // Expired will return true if the nebula cert is too young or too old compared to the provided time, otherwise false
